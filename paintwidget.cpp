@@ -1,4 +1,4 @@
-﻿#include "paintwidget.h"
+#include "paintwidget.h"
 #include "line.h"
 #include "rect.h"
 #include <QMouseEvent>
