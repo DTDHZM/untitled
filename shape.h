@@ -1,24 +1,16 @@
 #ifndef SHAPE_H
 #define SHAPE_H
 
-#include <QPoint>
 #include <QPainter>
+#include <QString>
 
 class Shape
 {
 public:
-    enum Code { Line, Rect };
-    Shape();
-    virtual ~Shape() = default;
-    void setStart(const QPoint &s) { start = s; }
-    void setEnd(const QPoint &e) { end = e; }
-    QPoint startPoint() const { return start; }
-    QPoint endPoint() const { return end; }
+    virtual ~Shape() {}
     virtual void paint(QPainter &painter) = 0;
-
-protected:
-    QPoint start;
-    QPoint end;
+    virtual QString toString() const = 0; // 添加虚拟方法 toString
+    virtual void fromString(const QString &data) = 0; // 添加虚拟方法 fromString
 };
 
 #endif // SHAPE_H
