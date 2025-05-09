@@ -1,62 +1,162 @@
-﻿#include "mainwindow.h"
-#include "ui_mainwindow.h"
-#include <QAction>
-#include <QToolBar>
-#include <QActionGroup>
-#include <QStatusBar>
-#include <QLabel>
-#include "ui_mainwindow.h"
-MainWindow::MainWindow(QWidget *parent) :
-    QMainWindow(parent),
-    ui(new Ui::MainWindow)
+#include "MainWindow.h"
+#include "ui_MainWindow.h"
+#include <QMouseEvent>
+#include <QFile>
+#include <QTextStream>
+#include <QFileDialog>
+#include <QMessageBox>
+
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent),
+    ui(new Ui::MainWindow),
+    isDrawing(false),
+    drawMode(None)
 {
     ui->setupUi(this);
 
-    // 创建工具栏
-    QToolBar *bar = new QToolBar(this);
-    addToolBar(bar);
+    // 添加“文件”菜单
+    QMenu *fileMenu = menuBar()->addMenu(tr("文件"));
+    QAction *saveAction = new QAction(tr("保存"), this);
+    QAction *openAction = new QAction(tr("打开"), this);
+    connect(saveAction, &QAction::triggered, this, &MainWindow::saveShapesToFile);
+    connect(openAction, &QAction::triggered, this, &MainWindow::loadShapesFromFile);
+    fileMenu->addAction(saveAction);
+    fileMenu->addAction(openAction);
 
-    // 创建动作组
-    QActionGroup *group = new QActionGroup(bar);
-
-    // 直线动作
-    QAction *drawLineAction = new QAction(QIcon(":/picture/line.png"), "Line", bar);
-    drawLineAction->setCheckable(true);
-    drawLineAction->setChecked(true);
-    drawLineAction->setToolTip("画线");
-    drawLineAction->setStatusTip("画线");
-    group->addAction(drawLineAction);
-    bar->addAction(drawLineAction);
-
-    // 矩形动作
-    QAction *drawRectAction = new QAction(QIcon(":/picture/rect.png"), "Rectangle", bar);
-    drawRectAction->setCheckable(true);
-    drawRectAction->setToolTip("画面");
-    drawRectAction->setStatusTip("画面");
-    group->addAction(drawRectAction);
-    bar->addAction(drawRectAction);
-
-    // 创建画板
-    paintWidget = new PaintWidget(this);
-    setCentralWidget(paintWidget);
-
-    // 信号与槽连接
-    connect(drawLineAction, &QAction::triggered, this, &MainWindow::drawLineActionTriggered);
-    connect(drawRectAction, &QAction::triggered, this, &MainWindow::drawRectActionTriggered);
-    connect(this, &MainWindow::changeCurrentShape, paintWidget, &PaintWidget::setCurrentShape);
-
-    // 状态栏
-    statusBar()->addWidget(new QLabel("Ready"));
+    // 添加“绘图”菜单
+    QMenu *drawMenu = menuBar()->addMenu(tr("绘图"));
+    QAction *drawLineAction = new QAction(tr("画线"), this);
+    QAction *drawRectAction = new QAction(tr("画矩形"), this);
+    connect(drawLineAction, &QAction::triggered, this, &MainWindow::selectDrawLine);
+    connect(drawRectAction, &QAction::triggered, this, &MainWindow::selectDrawRectangle);
+    drawMenu->addAction(drawLineAction);
+    drawMenu->addAction(drawRectAction);
 }
 
-void MainWindow::drawLineActionTriggered() {
-    emit changeCurrentShape(Shape::Line);
-}
-
-void MainWindow::drawRectActionTriggered() {
-    emit changeCurrentShape(Shape::Rect);
-}
-
-MainWindow::~MainWindow() {
+MainWindow::~MainWindow()
+{
+    // 清理动态分配的形状
+    for (Shape *shape : shapes) {
+        delete shape;
+    }
     delete ui;
+}
+
+void MainWindow::paintEvent(QPaintEvent *event)
+{
+    QPainter painter(this);
+
+    // 绘制所有形状
+    for (Shape *shape : shapes) {
+        shape->paint(painter);
+    }
+
+    // 绘制正在创建的形状
+    if (isDrawing) {
+        painter.setPen(Qt::DashLine);
+        if (drawMode == LineMode) {
+            painter.drawLine(startPoint, endPoint);
+        } else if (drawMode == RectMode) {
+            painter.drawRect(QRect(startPoint, endPoint));
+        }
+    }
+}
+
+void MainWindow::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && drawMode != None) {
+        startPoint = event->pos();
+        isDrawing = true;
+    }
+}
+
+void MainWindow::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && isDrawing) {
+        endPoint = event->pos();
+        isDrawing = false;
+
+        // 根据当前模式创建形状
+        if (drawMode == LineMode) {
+            Line *line = new Line();
+            line->setStart(startPoint);
+            line->setEnd(endPoint);
+            shapes.push_back(line);
+        } else if (drawMode == RectMode) {
+            Rect *rect = new Rect();
+            rect->setStart(startPoint);
+            rect->setEnd(endPoint);
+            shapes.push_back(rect);
+        }
+
+        // 更新绘图
+        update();
+    }
+}
+
+void MainWindow::saveShapesToFile()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, tr("保存文件"), "", tr("Text Files (*.txt)"));
+    if (filePath.isEmpty()) return;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("错误"), tr("无法保存文件"));
+        return;
+    }
+
+    QTextStream out(&file);
+    for (Shape *shape : shapes) {
+        out << shape->toString() << "\n"; // 调用 toString 方法
+    }
+
+    file.close();
+    QMessageBox::information(this, tr("成功"), tr("文件已保存"));
+}
+
+void MainWindow::loadShapesFromFile()
+{
+    QString filePath = QFileDialog::getOpenFileName(this, tr("打开文件"), "", tr("Text Files (*.txt)"));
+    if (filePath.isEmpty()) return;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("错误"), tr("无法打开文件"));
+        return;
+    }
+
+    QTextStream in(&file);
+
+    // 清空现有形状
+    for (Shape *shape : shapes) {
+        delete shape;
+    }
+    shapes.clear();
+
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        if (line.startsWith("Line")) {
+            Line *lineShape = new Line();
+            lineShape->fromString(line); // 调用 fromString 方法
+            shapes.push_back(lineShape);
+        } else if (line.startsWith("Rect")) {
+            Rect *rectShape = new Rect();
+            rectShape->fromString(line); // 调用 fromString 方法
+            shapes.push_back(rectShape);
+        }
+    }
+
+    file.close();
+    update();
+    QMessageBox::information(this, tr("成功"), tr("文件已加载"));
+}
+
+void MainWindow::selectDrawLine()
+{
+    drawMode = LineMode;
+}
+
+void MainWindow::selectDrawRectangle()
+{
+    drawMode = RectMode;
 }
